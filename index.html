@@ -1,0 +1,708 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ring Corridor</title>
+<meta name="description" content="A practice piece: an endless walk through a ring-shaped building, drawn in thin lines.">
+<script>
+/* =====================================================================
+   PAGE SETTINGS AND CONTENT: edit these first.
+   The 3D settings (ring size, speed, fog, line widths) are in the
+   module script further down, under "SETTINGS".
+   ===================================================================== */
+const THEME = 'dark';   // 'dark' = light lines on dark, 'light' = dark lines on light
+
+// One entry per section. angle: degrees around the ring (0 to 360).
+// link is optional: { text: 'Label', href: 'https://...' }
+const CONTENT = [
+  { angle: 0,   title: 'Section one (placeholder)',   body: 'Placeholder text. The real words for this section will go here.' },
+  { angle: 60,  title: 'Section two (placeholder)',   body: 'Placeholder text. The real words for this section will go here.', link: { text: 'Placeholder link', href: '#section-2' } },
+  { angle: 120, title: 'Section three (placeholder)', body: 'Placeholder text. The real words for this section will go here.' },
+  { angle: 180, title: 'Section four (placeholder)',  body: 'Placeholder text. The real words for this section will go here.' },
+  { angle: 240, title: 'Section five (placeholder)',  body: 'Placeholder text. The real words for this section will go here.' },
+  { angle: 300, title: 'Section six (placeholder)',   body: 'Placeholder text. The real words for this section will go here.' },
+];
+
+document.documentElement.dataset.theme = THEME;
+
+// Builds the sections as ordinary HTML. They stay readable as a plain
+// page if the 3D part can't start (no WebGL, or the library didn't load).
+function buildSections() {
+  const main = document.getElementById('sections');
+  if (!main || main.dataset.built) return;
+  main.dataset.built = 'yes';
+  CONTENT.forEach((item, i) => {
+    const n = i + 1;
+    const section = document.createElement('section');
+    section.className = 'panel';
+    section.id = `section-${n}`;
+    section.setAttribute('aria-labelledby', `section-${n}-title`);
+    const num = document.createElement('p');
+    num.className = 'panel-num';
+    num.textContent = String(n).padStart(2, '0');
+    const title = document.createElement('h2');
+    title.id = `section-${n}-title`;
+    title.textContent = item.title;
+    const body = document.createElement('p');
+    body.textContent = item.body;
+    section.append(num, title, body);
+    if (item.link) {
+      const p = document.createElement('p');
+      const a = document.createElement('a');
+      a.href = item.link.href;
+      a.textContent = item.link.text;
+      p.append(a);
+      section.append(p);
+    }
+    main.append(section);
+  });
+}
+document.addEventListener('DOMContentLoaded', buildSections);
+window.RING = { THEME, CONTENT, buildSections };
+</script>
+<style>
+  :root {
+    --bg: #0c0d0f;
+    --ink: #d9dcdf;
+    --ink-dim: #8b9097;
+    --accent: #d08a4c;
+    --panel-bg: rgba(12, 13, 15, 0.86);
+    --rule: rgba(217, 220, 223, 0.22);
+    --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  html[data-theme="light"] {
+    --bg: #efeee9;
+    --ink: #1d1f22;
+    --ink-dim: #5f636a;
+    --accent: #b9532b;
+    --panel-bg: rgba(239, 238, 233, 0.88);
+    --rule: rgba(29, 31, 34, 0.22);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); }
+  body { line-height: 1.5; }
+  #scene, .hud, .hint { display: none; }
+  a { color: var(--ink); text-decoration-color: var(--accent); text-underline-offset: 0.2em; }
+  a:hover { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  /* ---- Plain page (before the 3D starts, or if it can't) ---- */
+  .site-head { padding: 1rem 16px 0; }
+  .site-name { margin: 0; font-size: 0.8rem; letter-spacing: 0.16em; text-transform: uppercase; }
+  .site-sub { margin: 0.15rem 0 0; font-size: 0.75rem; color: var(--ink-dim); }
+  .sections { max-width: 40rem; margin: 0 auto; padding: 2rem 16px 4rem; }
+  .panel { border-top: 2px solid var(--accent); padding: 1rem 0 1.5rem; }
+  .panel-num { margin: 0 0 0.4rem; font-size: 0.72rem; letter-spacing: 0.16em; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .panel h2 { margin: 0 0 0.5rem; font-size: 1.2rem; font-weight: 500; line-height: 1.25; }
+  .panel p { margin: 0 0 0.5rem; color: var(--ink-dim); font-size: 0.95rem; }
+  .panel p:last-child { margin-bottom: 0; }
+  .panel .panel-num { color: var(--accent); }
+
+  /* ---- 3D mode: only switched on once the scene has started ---- */
+  html.is-3d, html.is-3d body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+  html.is-3d body { touch-action: none; -webkit-user-select: none; user-select: none; }
+  html.is-3d #scene { display: block; position: fixed; inset: 0; width: 100%; height: 100%; }
+  html.is-3d .site-head { position: fixed; top: 0; left: 0; z-index: 2; padding: max(14px, env(safe-area-inset-top)) 16px 0; pointer-events: none; }
+
+  html.is-3d .sections { position: fixed; inset: 0; max-width: none; margin: 0; padding: 0; pointer-events: none; z-index: 1; }
+  html.is-3d .panel {
+    position: absolute; left: 0; top: 0;
+    width: min(20rem, calc(100vw - 48px));
+    padding: 1rem 1.15rem 1.1rem;
+    background: var(--panel-bg);
+    border: 1px solid var(--rule); border-top: 2px solid var(--accent);
+    opacity: 0; pointer-events: none;
+    will-change: transform, opacity;
+  }
+  html.is-3d .panel.is-near { pointer-events: auto; -webkit-user-select: text; user-select: text; }
+
+  html.is-3d .hud {
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 12px;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 3;
+    padding: 0 16px max(14px, env(safe-area-inset-bottom));
+    font-size: 0.8rem; pointer-events: none;
+  }
+  .hud-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .hud button, .hud summary, .hud .dial { pointer-events: auto; }
+  .dial { width: 56px; height: 56px; flex: none; cursor: pointer; overflow: visible; }
+  .dial-track { fill: none; stroke: var(--rule); stroke-width: 1.5; }
+  .dial-tick { stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round; }
+  .dial-hit { fill: transparent; }
+  .dial-pos { fill: var(--ink); }
+  .hud-text { min-width: 0; }
+  .where { margin: 0 0 0.2rem; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 52vw; }
+  .menu { position: relative; }
+  .menu summary {
+    display: inline-block; list-style: none; cursor: pointer;
+    letter-spacing: 0.12em; text-transform: uppercase; font-size: 0.72rem;
+    padding: 0.45rem 0.7rem; border: 1px solid var(--rule); background: var(--panel-bg);
+  }
+  .menu summary::-webkit-details-marker { display: none; }
+  .menu ol {
+    position: absolute; bottom: calc(100% + 8px); left: 0; margin: 0; padding: 0.35rem 0; list-style: none;
+    min-width: 15rem; max-width: calc(100vw - 32px); background: var(--bg); border: 1px solid var(--rule); pointer-events: auto;
+  }
+  .menu li button { width: 100%; text-align: left; padding: 0.55rem 0.85rem; display: flex; gap: 0.7rem; }
+  .menu li button:hover { color: var(--accent); }
+  .menu li span { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .hud button { font: inherit; color: var(--ink); background: none; border: 0; cursor: pointer; }
+  .hud .drift {
+    letter-spacing: 0.12em; text-transform: uppercase; font-size: 0.72rem;
+    padding: 0.45rem 0.7rem; border: 1px solid var(--rule); background: var(--panel-bg); white-space: nowrap;
+  }
+
+  html.is-3d .hint {
+    display: block; position: fixed; left: 50%; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 76px); transform: translateX(-50%); z-index: 2; margin: 0;
+    max-width: calc(100vw - 32px); text-align: center; font-size: 0.8rem; color: var(--ink-dim);
+    transition: opacity 1.2s ease; pointer-events: none;
+  }
+  html.is-3d .hint.is-gone { opacity: 0; }
+</style>
+</head>
+<body>
+<canvas id="scene" aria-hidden="true"></canvas>
+
+<header class="site-head">
+  <p class="site-name">Ring Corridor</p>
+  <p class="site-sub">Practice piece · placeholder content</p>
+</header>
+
+<main id="sections" class="sections"></main>
+
+<div class="hud">
+  <div class="hud-left">
+    <svg class="dial" id="dial" viewBox="0 0 100 100" aria-hidden="true">
+      <circle class="dial-track" cx="50" cy="50" r="40"></circle>
+      <g id="dial-ticks"></g>
+      <circle class="dial-pos" id="dial-pos" cx="50" cy="10" r="4.5"></circle>
+    </svg>
+    <div class="hud-text">
+      <p class="where" id="where"></p>
+      <nav class="menu" aria-label="Sections">
+        <details id="menu">
+          <summary>Sections</summary>
+          <ol id="section-list"></ol>
+        </details>
+      </nav>
+    </div>
+  </div>
+  <button class="drift" id="drift" type="button">Pause drift</button>
+</div>
+<p class="hint" id="hint">Scroll, drag or use the arrow keys to travel</p>
+<noscript><p class="sections">This page needs JavaScript for the 3D corridor.</p></noscript>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+
+/* =====================================================================
+   SETTINGS: change these to reshape the building and the ride.
+   Distances are in metres, speeds in metres per second.
+   ===================================================================== */
+// (THEME and CONTENT are set in the first script, near the top of the file)
+const { THEME, CONTENT } = window.RING;
+window.RING.buildSections();
+
+const RING_RADIUS      = 180;     // centre of the ring to the middle of the corridor
+const CORRIDOR_WIDTH   = 9;       // inner wall to outer wall
+const CORRIDOR_HEIGHT  = 6;       // floor to ceiling
+const EYE_HEIGHT       = 1.7;     // camera height above the floor
+
+const RIB_COUNT        = 160;     // cross-ribs around the whole ring
+const WINDOW_COUNT     = 160;     // openings in the inner wall around the whole ring
+const OPENING_WIDTH    = 0.45;    // share of each window bay that is open (0 to 1)
+const SILL_HEIGHT      = 0.45;    // bottom of each opening
+const LINTEL_HEIGHT    = 5.1;     // top of each opening
+const SEGMENTS_PER_RIB = 4;       // smoothness of the long curved lines
+
+const DRIFT_SPEED      = 1.6;     // gentle default glide
+const MAX_SPEED        = 45;      // fastest the visitor can push it
+const FOG_NEAR         = 12;      // lines start fading here...
+const FOG_FAR          = 640;     // ...and are gone here
+
+const LINE_WIDTH         = 1;     // ordinary lines, in screen pixels
+const OPENING_LINE_WIDTH = 1.8;   // edges of the inner-wall openings
+const ACCENT_LINE_WIDTH  = 2;     // content markers
+
+const COLOURS = {
+  dark:  { bg: '#0c0d0f', line: '#6f757c', bright: '#d9dcdf', accent: '#d08a4c' },
+  light: { bg: '#efeee9', line: '#8f9398', bright: '#1d1f22', accent: '#b9532b' },
+};
+
+/* Motion feel (smaller numbers = snappier) */
+const SPEED_SMOOTHING = 0.45;     // seconds for speed to settle on its target
+const BOOST_DECAY     = 1.6;      // seconds for a push to fade back to the drift
+const WHEEL_GAIN      = 0.018;    // speed added per pixel of scroll
+const TOUCH_GAIN      = 0.07;     // speed added per pixel of drag
+const KEY_ACCEL       = 14;       // speed added per second while an arrow key is held
+const SWAY_YAW        = 4;        // degrees of look-around from the mouse or tilt
+const SWAY_PITCH      = 2.5;
+
+/* Content panels */
+const PANEL_SIDE       = 2.6;     // metres from the centreline toward the outer wall
+const PANEL_HEIGHT     = 2.3;     // height of the panel's centre
+const PANEL_SHOW_FAR   = 46;      // panels fade in from this far ahead...
+const PANEL_FULL_FAR   = 30;      // ...are fully shown from here...
+const PANEL_FULL_NEAR  = 9;       // ...until here...
+const PANEL_HIDE_NEAR  = 4;       // ...and have faded out by here
+const STOP_BEFORE      = 11;      // a section jump stops this far short of the panel
+
+/* ===================================================================== */
+
+const TAU = Math.PI * 2;
+const R_IN  = RING_RADIUS - CORRIDOR_WIDTH / 2;
+const R_OUT = RING_RADIUS + CORRIDOR_WIDTH / 2;
+const H = CORRIDOR_HEIGHT;
+const CIRCUMFERENCE = TAU * RING_RADIUS;       // length of one lap along the camera path
+const BAY = TAU / WINDOW_COUNT;
+const HALF_OPEN = (BAY * OPENING_WIDTH) / 2;
+const PALETTE = COLOURS[THEME];
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const wrapAngle = (a) => ((a % TAU) + TAU) % TAU;
+const wrapS = (s) => ((s % CIRCUMFERENCE) + CIRCUMFERENCE) % CIRCUMFERENCE;
+// shortest signed distance along the ring from a to b, in (-C/2, C/2]
+const ringDelta = (a, b) => {
+  let d = wrapS(b - a);
+  return d > CIRCUMFERENCE / 2 ? d - CIRCUMFERENCE : d;
+};
+const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+
+// Is this angle inside one of the inner-wall openings?
+function inOpening(a) {
+  a = wrapAngle(a);
+  const centre = (Math.floor(a / BAY) + 0.5) * BAY;
+  return Math.abs(a - centre) < HALF_OPEN;
+}
+
+/* ---------------------------------------------------------------------
+   1. The angle list. Every long line and every hidden surface uses these
+   same angles, so their corners line up exactly (no flicker), and the
+   list closes on itself, so the lap has no seam.
+   --------------------------------------------------------------------- */
+const angles = (() => {
+  const list = [];
+  const n = RIB_COUNT * SEGMENTS_PER_RIB;
+  for (let i = 0; i < n; i++) list.push((i / n) * TAU);
+  for (let w = 0; w < WINDOW_COUNT; w++) {
+    const c = (w + 0.5) * BAY;
+    list.push(wrapAngle(c - HALF_OPEN), wrapAngle(c + HALF_OPEN));
+  }
+  list.sort((a, b) => a - b);
+  const out = [];
+  for (const a of list) if (!out.length || a - out[out.length - 1] > 1e-7) out.push(a);
+  if (TAU - out[out.length - 1] < 1e-7) out.pop();   // don't duplicate 0 at 2π
+  return out;
+})();
+const M = angles.length;
+const COS = angles.map(Math.cos);
+const SIN = angles.map(Math.sin);
+
+// A point at radius r, height y, at angle-list index j (or any angle a)
+const at  = (r, j, y) => [r * COS[j], y, r * SIN[j]];
+const atA = (r, a, y) => [r * Math.cos(a), y, r * Math.sin(a)];
+
+/* ---------------------------------------------------------------------
+   2. Lines. Three sets: ordinary, bright (opening edges), accent (content).
+   --------------------------------------------------------------------- */
+const thin = [], bright = [], accent = [];
+const seg = (arr, p, q) => arr.push(p[0], p[1], p[2], q[0], q[1], q[2]);
+
+for (let j = 0; j < M; j++) {
+  const k = (j + 1) % M;                       // the last interval closes back to index 0
+  const open = inOpening((angles[j] + (k ? angles[k] : TAU)) / 2);
+  const run = (arr, r, y) => seg(arr, at(r, j, y), at(r, k, y));
+
+  // floor and ceiling edges, plus a few lines along the floor and ceiling
+  run(thin, R_IN, 0);  run(thin, R_OUT, 0);
+  run(thin, R_IN, H);  run(thin, R_OUT, H);
+  run(thin, RING_RADIUS - CORRIDOR_WIDTH / 6, 0);
+  run(thin, RING_RADIUS + CORRIDOR_WIDTH / 6, 0);
+  run(thin, RING_RADIUS - CORRIDOR_WIDTH / 6, H);
+  run(thin, RING_RADIUS + CORRIDOR_WIDTH / 6, H);
+
+  // outer wall courses (the solid side)
+  run(thin, R_OUT, 1.0);
+  run(thin, R_OUT, LINTEL_HEIGHT);
+
+  // inner wall: sill and lintel lines, brighter across the openings
+  run(open ? bright : thin, R_IN, SILL_HEIGHT);
+  run(open ? bright : thin, R_IN, LINTEL_HEIGHT);
+}
+
+// Cross-ribs: one rectangle around the corridor's cross-section
+function rib(arr, a) {
+  seg(arr, atA(R_IN, a, 0), atA(R_OUT, a, 0));      // floor
+  seg(arr, atA(R_OUT, a, 0), atA(R_OUT, a, H));     // outer wall
+  seg(arr, atA(R_IN, a, H), atA(R_OUT, a, H));      // ceiling
+  if (inOpening(a)) {                               // inner wall, skipping any opening
+    seg(arr, atA(R_IN, a, 0), atA(R_IN, a, SILL_HEIGHT));
+    seg(arr, atA(R_IN, a, LINTEL_HEIGHT), atA(R_IN, a, H));
+  } else {
+    seg(arr, atA(R_IN, a, 0), atA(R_IN, a, H));
+  }
+}
+const ribStep = SEGMENTS_PER_RIB / (RIB_COUNT * SEGMENTS_PER_RIB);
+for (let i = 0; i < RIB_COUNT; i++) rib(thin, i * ribStep * TAU);
+
+// Content markers: an accent frame at each section's angle
+for (const item of CONTENT) rib(accent, item.angle * Math.PI / 180);
+
+// Opening sides
+for (let w = 0; w < WINDOW_COUNT; w++) {
+  const c = (w + 0.5) * BAY;
+  for (const a of [c - HALF_OPEN, c + HALF_OPEN]) {
+    seg(bright, atA(R_IN, a, SILL_HEIGHT), atA(R_IN, a, LINTEL_HEIGHT));
+  }
+}
+
+/* ---------------------------------------------------------------------
+   3. Hidden surfaces. Invisible walls, floor and ceiling that only write
+   depth, so lines behind a solid wall are hidden and the far side of the
+   ring shows only through the openings.
+   --------------------------------------------------------------------- */
+const occ = [];
+function quad(j, k, r1, y1, r2, y2) {
+  const a = at(r1, j, y1), b = at(r2, j, y2), c = at(r2, k, y2), d = at(r1, k, y1);
+  occ.push(...a, ...b, ...c, ...a, ...c, ...d);
+}
+for (let j = 0; j < M; j++) {
+  const k = (j + 1) % M;
+  quad(j, k, R_IN, 0, R_OUT, 0);                  // floor
+  quad(j, k, R_IN, H, R_OUT, H);                  // ceiling
+  quad(j, k, R_OUT, 0, R_OUT, H);                 // outer wall
+  if (inOpening((angles[j] + (k ? angles[k] : TAU)) / 2)) {
+    quad(j, k, R_IN, 0, R_IN, SILL_HEIGHT);       // below the opening
+    quad(j, k, R_IN, LINTEL_HEIGHT, R_IN, H);     // above the opening
+  } else {
+    quad(j, k, R_IN, 0, R_IN, H);                 // pier
+  }
+}
+
+/* ---------------------------------------------------------------------
+   4. Three.js scene
+   --------------------------------------------------------------------- */
+const canvas = document.getElementById('scene');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setClearColor(PALETTE.bg);
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(PALETTE.bg, FOG_NEAR, FOG_FAR);
+const camera = new THREE.PerspectiveCamera(62, 1, 0.3, 1000);
+
+const occGeo = new THREE.BufferGeometry();
+occGeo.setAttribute('position', new THREE.Float32BufferAttribute(occ, 3));
+const occluder = new THREE.Mesh(occGeo, new THREE.MeshBasicMaterial({
+  colorWrite: false, side: THREE.DoubleSide,
+  polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+}));
+occluder.renderOrder = -1;                         // draw depth first
+scene.add(occluder);
+
+const lineMaterials = [];
+function addLines(arr, colour, width) {
+  const geo = new LineSegmentsGeometry();
+  geo.setPositions(arr);
+  const mat = new LineMaterial({ color: colour, linewidth: width, fog: true });
+  lineMaterials.push(mat);
+  const lines = new LineSegments2(geo, mat);
+  scene.add(lines);
+  return lines;
+}
+addLines(thin, PALETTE.line, LINE_WIDTH);
+addLines(bright, PALETTE.bright, OPENING_LINE_WIDTH);
+addLines(accent, PALETTE.accent, ACCENT_LINE_WIDTH);
+
+/* ---------------------------------------------------------------------
+   5. Motion. The position is one number, s: metres along the camera's
+   circle, always kept between 0 and one lap. The camera is rebuilt from
+   it every frame, so nothing drifts or jumps however many laps you go.
+   --------------------------------------------------------------------- */
+const state = {
+  s: 0,                 // where we are along the lap
+  v: 0,                 // current speed (negative = backwards)
+  boost: 0,             // extra speed from scrolling, dragging or keys; fades away
+  driftDir: 1,          // which way the gentle drift goes
+  driftOn: !reducedMotion,
+  keyDir: 0,
+  jump: null,           // an eased trip to a section, while one is under way
+};
+
+function push(dv) {
+  if (state.jump) {     // any scroll, drag or key takes back control, keeping the current speed
+    state.jump = null;
+    state.boost = state.v - (state.driftOn ? DRIFT_SPEED * state.driftDir : 0);
+  }
+  state.boost = clamp(state.boost + dv, -MAX_SPEED * 1.2, MAX_SPEED * 1.2);
+  if (Math.abs(state.boost) > DRIFT_SPEED) state.driftDir = Math.sign(state.boost);
+}
+
+/* Section jumps follow a smooth curve that starts at the current speed
+   and ends at rest, with no sudden change in acceleration at either end. */
+const easeTo   = (u) => u * u * u * (10 - 15 * u + 6 * u * u);          // 0 -> 1
+const easeToD  = (u) => 30 * u * u * (1 - u) * (1 - u);                 // its slope
+const carry    = (u) => u - 6 * u ** 3 + 8 * u ** 4 - 3 * u ** 5;       // fades out the starting speed
+const carryD   = (u) => 1 - 18 * u ** 2 + 32 * u ** 3 - 15 * u ** 4;
+
+function jumpTo(index) {
+  const targetS = wrapS(CONTENT[index].angle * Math.PI / 180 * RING_RADIUS - STOP_BEFORE);
+  const D = ringDelta(state.s, targetS);            // shortest way round
+  const T = clamp(1.2 + Math.sqrt(Math.abs(D)) * 0.32, 1.5, 7);
+  state.boost = 0;
+  state.jump = { s0: state.s, D, v0: state.v, T, t: 0 };
+}
+
+function updateMotion(dt) {
+  if (state.jump) {
+    const j = state.jump;
+    j.t += dt;
+    const u = Math.min(j.t / j.T, 1);
+    state.s = wrapS(j.s0 + j.D * easeTo(u) + j.v0 * j.T * carry(u));
+    state.v = (j.D * easeToD(u)) / j.T + j.v0 * carryD(u);
+    if (u >= 1) { state.jump = null; state.v = 0; }
+    return;
+  }
+  if (state.keyDir) push(state.keyDir * KEY_ACCEL * dt);
+  state.boost *= Math.exp(-dt / BOOST_DECAY);
+  const drift = state.driftOn ? DRIFT_SPEED * state.driftDir : 0;
+  const target = clamp(drift + state.boost, -MAX_SPEED, MAX_SPEED);
+  state.v += (target - state.v) * (1 - Math.exp(-dt / SPEED_SMOOTHING));
+  state.s = wrapS(state.s + state.v * dt);
+}
+
+/* Look-around: a few degrees from the mouse or device tilt, smoothed */
+const sway = { x: 0, y: 0, tx: 0, ty: 0 };
+const swayScale = reducedMotion ? 0 : 1;
+window.addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'mouse') return;
+  sway.tx = (e.clientX / innerWidth) * 2 - 1;
+  sway.ty = (e.clientY / innerHeight) * 2 - 1;
+});
+let tiltBase = null;
+window.addEventListener('deviceorientation', (e) => {
+  if (e.gamma == null || e.beta == null) return;
+  if (!tiltBase) tiltBase = { g: e.gamma, b: e.beta };
+  sway.tx = clamp((e.gamma - tiltBase.g) / 25, -1, 1);
+  sway.ty = clamp((e.beta - tiltBase.b) / 25, -1, 1);
+});
+
+const _target = new THREE.Vector3();
+function placeCamera(dt) {
+  const k = 1 - Math.exp(-dt / 0.6);
+  sway.x += (sway.tx - sway.x) * k;
+  sway.y += (sway.ty - sway.y) * k;
+  const theta = state.s / RING_RADIUS;
+  const c = Math.cos(theta), s = Math.sin(theta);
+  camera.position.set(RING_RADIUS * c, EYE_HEIGHT, RING_RADIUS * s);
+  // forward is the tangent; "right" points in toward the courtyard
+  const yaw = -sway.x * SWAY_YAW * swayScale * Math.PI / 180;
+  const pitch = -sway.y * SWAY_PITCH * swayScale * Math.PI / 180;
+  const fx = -s, fz = c, rx = -c, rz = -s;
+  _target.set(
+    camera.position.x + fx * Math.cos(yaw) - rx * Math.sin(yaw),
+    EYE_HEIGHT + Math.tan(pitch),
+    camera.position.z + fz * Math.cos(yaw) - rz * Math.sin(yaw),
+  );
+  camera.lookAt(_target);
+}
+
+/* ---------------------------------------------------------------------
+   6. Input: scroll wheel, touch drag and arrow keys all push the speed
+   --------------------------------------------------------------------- */
+window.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? innerHeight : 1;
+  push(clamp(e.deltaY * unit, -400, 400) * WHEEL_GAIN);
+}, { passive: false });
+
+let dragY = null;
+window.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'mouse') dragY = e.clientY;
+});
+window.addEventListener('pointermove', (e) => {
+  if (dragY === null || e.pointerType === 'mouse') return;
+  push((dragY - e.clientY) * TOUCH_GAIN);        // drag up = forward, like scrolling
+  dragY = e.clientY;
+});
+for (const ev of ['pointerup', 'pointercancel']) window.addEventListener(ev, () => { dragY = null; });
+
+const KEYS = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 };
+const held = new Set();
+window.addEventListener('keydown', (e) => {
+  if (!(e.key in KEYS)) return;
+  e.preventDefault();
+  held.add(e.key);
+  state.keyDir = Math.sign([...held].reduce((t, k) => t + KEYS[k], 0));
+});
+window.addEventListener('keyup', (e) => {
+  if (!(e.key in KEYS)) return;
+  held.delete(e.key);
+  state.keyDir = Math.sign([...held].reduce((t, k) => t + KEYS[k], 0));
+});
+window.addEventListener('blur', () => { held.clear(); state.keyDir = 0; });
+
+/* ---------------------------------------------------------------------
+   7. Size: fill the window, sharp on high-density screens, and keep a
+   wide enough view on tall phone screens
+   --------------------------------------------------------------------- */
+const MIN_H_FOV = 78, BASE_V_FOV = 62, MAX_V_FOV = 100;
+function resize() {
+  const w = innerWidth, h = innerHeight, aspect = w / h;
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  renderer.setSize(w, h, false);
+  const needed = 2 * Math.atan(Math.tan((MIN_H_FOV * Math.PI) / 360) / aspect) * 180 / Math.PI;
+  camera.fov = clamp(Math.max(BASE_V_FOV, needed), BASE_V_FOV, MAX_V_FOV);
+  camera.aspect = aspect;
+  camera.updateProjectionMatrix();
+  for (const m of lineMaterials) m.resolution.set(w, h);
+  measurePanels();
+}
+window.addEventListener('resize', resize);
+
+/* ---------------------------------------------------------------------
+   8. Content panels: real HTML laid over the canvas. Each one is pinned
+   to a point in the corridor, grows and slides past as you approach,
+   then fades.
+   --------------------------------------------------------------------- */
+const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const panels = CONTENT.map((item, i) => {
+  const a = item.angle * Math.PI / 180;
+  const el = document.getElementById(`section-${i + 1}`);
+  // keyboard users: focusing a link in a far-away panel travels there
+  el.addEventListener('focusin', () => { if (!el.classList.contains('is-near')) jumpTo(i); });
+  return {
+    el, s: wrapS(a * RING_RADIUS),
+    anchor: new THREE.Vector3(...atA(RING_RADIUS + PANEL_SIDE, a, PANEL_HEIGHT)),
+    w: 0, h: 0, shown: false,
+  };
+});
+function measurePanels() { for (const p of panels) { p.w = p.el.offsetWidth; p.h = p.el.offsetHeight; } }
+
+const _v = new THREE.Vector3();
+function placePanels() {
+  const w = innerWidth, h = innerHeight;
+  for (const p of panels) {
+    const ahead = ringDelta(state.s, p.s);          // metres ahead (negative = behind)
+    const alpha = smooth(PANEL_SHOW_FAR, PANEL_FULL_FAR, ahead) * smooth(PANEL_HIDE_NEAR, PANEL_FULL_NEAR, ahead);
+    if (alpha <= 0.001) {
+      if (p.shown) { p.el.classList.remove('is-near'); p.el.style.opacity = 0; p.shown = false; }
+      continue;
+    }
+    _v.copy(p.anchor).project(camera);
+    const scale = 0.55 + 0.45 * smooth(PANEL_SHOW_FAR, PANEL_FULL_NEAR, ahead);
+    const hw = (p.w * scale) / 2 + 12, hh = (p.h * scale) / 2 + 12;
+    // keep the panel on screen; small screens would otherwise push it off the edge
+    const x = clamp((_v.x + 1) / 2 * w, hw, w - hw);
+    const y = clamp((1 - _v.y) / 2 * h, hh + 40, h - hh - 90);
+    p.el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -50%) scale(${scale.toFixed(3)})`;
+    p.el.style.opacity = alpha.toFixed(3);
+    p.shown = true;
+    p.el.classList.toggle('is-near', alpha > 0.4);
+  }
+}
+
+/* ---------------------------------------------------------------------
+   9. Fixed controls: the round progress dial, the sections menu, the
+   drift button and the first-visit hint
+   --------------------------------------------------------------------- */
+const SVG = 'http://www.w3.org/2000/svg';
+const dialPos = document.getElementById('dial-pos');
+const dialTicks = document.getElementById('dial-ticks');
+const where = document.getElementById('where');
+const list = document.getElementById('section-list');
+const menu = document.getElementById('menu');
+const driftBtn = document.getElementById('drift');
+const hint = document.getElementById('hint');
+// ring angle -> point on the dial (0 at the top, clockwise = forward)
+const dialPoint = (a, r) => [50 + r * Math.sin(a), 50 - r * Math.cos(a)];
+
+CONTENT.forEach((item, i) => {
+  const a = item.angle * Math.PI / 180;
+  const [x1, y1] = dialPoint(a, 34), [x2, y2] = dialPoint(a, 46), [hx, hy] = dialPoint(a, 40);
+  const tick = document.createElementNS(SVG, 'line');
+  tick.setAttribute('class', 'dial-tick');
+  tick.setAttribute('x1', x1); tick.setAttribute('y1', y1);
+  tick.setAttribute('x2', x2); tick.setAttribute('y2', y2);
+  const hit = document.createElementNS(SVG, 'circle');     // a bigger target for fingers
+  hit.setAttribute('class', 'dial-hit');
+  hit.setAttribute('cx', hx); hit.setAttribute('cy', hy); hit.setAttribute('r', 11);
+  hit.addEventListener('click', () => jumpTo(i));
+  dialTicks.append(tick, hit);
+
+  const li = document.createElement('li');
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  const num = document.createElement('span');
+  num.textContent = String(i + 1).padStart(2, '0');
+  btn.append(num, document.createTextNode(item.title));
+  btn.addEventListener('click', () => { menu.open = false; jumpTo(i); });
+  li.append(btn);
+  list.append(li);
+});
+
+function setDriftLabel() { driftBtn.textContent = state.driftOn ? 'Pause drift' : 'Start drift'; }
+driftBtn.addEventListener('click', () => { state.driftOn = !state.driftOn; setDriftLabel(); });
+setDriftLabel();
+
+if (reducedMotion) hint.textContent = 'Drift is paused (reduced motion). Scroll, drag or use the arrow keys to travel';
+const hintTimer = setTimeout(hideHint, 9000);
+function hideHint() { hint.classList.add('is-gone'); clearTimeout(hintTimer); }
+for (const ev of ['wheel', 'touchstart', 'keydown']) window.addEventListener(ev, hideHint, { once: true, passive: true });
+
+let whereIndex = -1;
+function updateHud() {
+  const a = state.s / RING_RADIUS;
+  const [x, y] = dialPoint(a, 40);
+  dialPos.setAttribute('cx', x.toFixed(2));
+  dialPos.setAttribute('cy', y.toFixed(2));
+  // name the nearest section
+  let best = 0, bestD = Infinity;
+  panels.forEach((p, i) => { const d = Math.abs(ringDelta(state.s, p.s)); if (d < bestD) { bestD = d; best = i; } });
+  if (best !== whereIndex) {
+    whereIndex = best;
+    where.textContent = `${String(best + 1).padStart(2, '0')} / ${String(CONTENT.length).padStart(2, '0')} · ${CONTENT[best].title}`;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   10. The loop
+   --------------------------------------------------------------------- */
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 0.05);   // cap, so a hidden tab can't cause a leap
+  last = now;
+  updateMotion(dt);
+  placeCamera(dt);
+  renderer.render(scene, camera);
+  placePanels();
+  updateHud();
+  requestAnimationFrame(frame);
+}
+
+// start a little before the first section, so its panel drifts into view
+if (panels.length) state.s = wrapS(panels[0].s - 42);
+
+document.documentElement.classList.add('is-3d');
+resize();
+placeCamera(1);
+requestAnimationFrame(frame);
+
+// Debug handle for testing in the browser console
+window.__ring = {
+  state, camera, CIRCUMFERENCE, segments: (thin.length + bright.length + accent.length) / 6,
+  setS(s) { state.s = wrapS(s); state.v = 0; state.boost = 0; placeCamera(1); renderer.render(scene, camera); },
+  push, ringDelta, jumpTo,
+};
+</script>
+</body>
+</html>
